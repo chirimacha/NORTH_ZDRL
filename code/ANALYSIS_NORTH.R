@@ -21,7 +21,9 @@ library(elevatr)
 library(ggmap)
 library(sf)
 library(forcats)
-# ***** NOTA : PUEDEN COMENZAR DESDE LA LINEA 81 PARA QUE PUEDAN REPRODUCIR EL CODIGO ******
+# *****
+#NOTA : PUEDEN COMENZAR DESDE LA LINEA 81 PARA QUE PUEDAN REPRODUCIR 
+#EL CODIGO ******
 
 # Organización del código: 
 # PARTE I, lineas 29-69 seleccionando campos y cambiando clases de algunas columnas
@@ -29,7 +31,7 @@ library(forcats)
 # con análisis descriptivos, plots y análisis univariados para VI CUANTI
 # PARTE III lineas 162-464 seleccionando variables independientes cualitativas,explorando
 # con analisis y plots descriptivos, finalmente analisis univariados para VI CUALI
-# PARTE IV lineas 465- análisis multivariado  
+# PARTE IV lineas 465-598 análisis multivariado  
 
 # PARTE I
 # reading  shape file final #
@@ -478,7 +480,8 @@ library(plyr) #Data manipulation
 library(GGally) #Multipanel graphs
 library(AER)
 library(MASS) # to run NB models
-
+library(jtools)
+library(glmtoolbox)
 # COMENZAREMOS EL ANALISIS CON LA VARIABLE Y INFESTACION COMO CONTEO DE INSECTOS ENCONTRADOS
 # (infestadas con T. carrioni 38 viviendas de 143 inspeccionadas)
 # USAREMOS GLM con familia poisson o nb si es que la data tuviera sobredispersion
@@ -487,48 +490,88 @@ library(MASS) # to run NB models
 # seleccionando columnas con las variables de interes que han sido exploradas en los 
 # analisis bivariados y que según lo visto en campo, podrían tener importancia como factores 
 # de riesgo o protectores en la infestacion o la positivad a t . cruzi.
+# leyendo la data final como data frame para los modelos
+dt_analysis<-read.csv("~/NORTH_ZDRL/data/dt_analysis18_mar_2024.csv")
 
 # Tabla con columnas para el analisis de infestacion como conteo #
-dt_model<-dt_analysis%>%dplyr::select(ndvi,elevation,fumigad,AVE_PERI,CUY_INTRA,AVE_PERI_,CUY_INTRA_,
-                                      n_people,cap_ttl,SECTOR,TEJ,PLAS,CARR)
+dt_model1<-dt_analysis%>%dplyr::select(SECTOR,ndvi,elevation,fumigad,AVE_PERI,AVE_INTRA,CUY_PERI,
+                                      CUY_INTRA,GAT_INT,GAT_PER,PER_PER,PER_INT,n_people,
+                                      cap_ttl,ADOB_RE,CARR,TEJ,
+                                      TEL,PLAS,NOBL,LADR_NO,CALAM)
+dt_model2<-dt_analysis%>%dplyr::select(SECTOR,ndvi,elevation,fumigad,AVE_PERI,AVE_INTRA,CUY_PERI,
+                                       CUY_INTRA,GAT_INT,GAT_PER,PER_PER,PER_INT,n_people,
+                                       INF,ADOB_RE,CARR,TEJ,
+                                       TEL,PLAS,NOBL,LADR_NO,CALAM)
+# We will work with:
+# step wise forwardselection for best model #
+#               for infestation             #
+# ========================================= #
+fit.all_poi=glm(cap_ttl~., family = "poisson",data =dt_model1 )
+summ(fit.all_poi)
+summ(fit.all_poi, robust = "HC1")
+summary(fit.all_poi)
+formula(fit.all_poi)
 
-# STARTING WITHTHE BASIC MODEL POISSON #
-summary(model.poisson<-glm(cap_ttl~elevation+ndvi+AVE_PERI+CUY_INTRA+n_people+TEJ+PLAS+CARR+SECTOR, data = dt_model, family = "poisson"))
+fitstart_poi = glm(cap_ttl~1,family = "poisson",data = dt_model1)
+summ(fitstart_poi, robust = "HC1")
+summary(fitstart_poi)
 
-dispersiontest(model.poisson)
+# step wise forward poisson
+step(fitstart_poi,direction = "forward",scope = formula(fit.all_poi))
+
+# final model after stepwise forward 
+model.poi<-glm(formula = cap_ttl ~ SECTOR + CUY_INTRA + GAT_PER + elevation + 
+                 n_people + CALAM + ADOB_RE + TEL + CARR + AVE_INTRA + fumigad + 
+                 PLAS + PER_INT, family = "poisson", data = dt_model1)
+summary(model.poi)
+summ(model.poi)
 # WE DISCARD NULL HYPOTHESIS SO TEHRE IS OVERDISPERSION 
+dispersiontest(model.poi)
 # WE WILL USE NB MODEL
 
-# overdisperson with NB #
-# ===================== #
+# # ANALYZING COLINEARITY #
+vif(model.poi)
+# correlation matrix
+cor_matrix <- cor(dt_model1 [c("ndvi","elevation","AVE_PERI","AVE_INTRA","CUY_PERI","CUY_INTRA")])
+# Visualizing the correlation matrix
+image(cor_matrix, main = "Correlation Matrix", col = colorRampPalette(c("blue", "white", "red"))(20))
 
-summary(model.nb<-glm.nb(cap_ttl~elevation+ndvi+AVE_PERI+CUY_INTRA+n_people+TEJ+PLAS+CARR+SECTOR,
-                         data = dt_model,link = log))
+library(sjPlot)
+library(sjmisc)
+library(sjlabelled)
 
-# Compare models #
-# ============== #
+#summ(model.poi)
 
-logLik(model.poisson)
-logLik(model.nb)
+# We will do FORWARD SELECTION  with NB #
+# ===================================== #
+# TO CHECK OUR model we will develop a step forward selection approach
+# stepwise forward selection for best model #
+#               for infestation.            #
+# ========================================= #
+# model with all the variables  
+fit.all.nb=glm.nb(cap_ttl~., data =dt_model1 )
+summary(fit.all.nb)
+formula(fit.all.nb)
 
-lrtest(model.poisson,model.nb)
-# Model 1: cap_ttl ~ elevation + ndvi + AVE_PERI + CUY_INTRA + n_people + 
-#   TEJ + PLAS + CARR + SECTOR
-# Model 2: cap_ttl ~ elevation + ndvi + AVE_PERI + CUY_INTRA + n_people + 
-#   TEJ + PLAS + CARR + SECTOR
-# #Df  LogLik Df  Chisq Pr(>Chisq)    
-# 1  19 -284.79                         
-# 2  20 -158.88  1 251.82  < 2.2e-16 ***
-#   ---
-#   Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
-
-c(model.poisson$aic,model.nb$aic)
-# 607.5753 357.7590
-# we are going to choose the model NB #
+#model at first level
+fitstart = glm.nb(cap_ttl~1,data = dt_model1)
+summary(fitstart)
+# stepwise forward selection
+step(fitstart,direction = "forward",scope = formula(fit.all.nb))
 
 
-# testing for excess zeros #
-# ======================== #
+# final model after stepwise forward 
+model.nb<-glm.nb(formula = cap_ttl ~ elevation + SECTOR + CUY_INTRA + CALAM + 
+                   fumigad, data = dt_model1, init.theta = 0.2834622006, link = log)
+
+# ANALYZING COLINEARITY #
+ggcorr(dt_model1,palette = "RdBu",label = TRUE,label_round = 2)
+vif(model.nb)
+#creating correlational tables of variables in final model
+corr_table<-as.table(cor_matrix <- cor(dt_model1 [c("ndvi","elevation","AVE_PERI","AVE_INTRA","CUY_PERI","CUY_INTRA")]))
+#write.table(corr_table,"~/Documents/Clases/PROYECTO_208732/ANALISIS_AULLAN_2023/tabla_correlation.csv")
+# Visualizing the correlation matrix
+image(cor_matrix, main = "Correlation Matrix", col = colorRampPalette(c("blue", "white", "red"))(20))
 
 library(performance) # to test zero inflated
 check_zeroinflation(model.nb)
@@ -538,28 +581,73 @@ check_zeroinflation(model.nb)
 # Predicted zeros: 104
 # Ratio: 0.99
 # 
-# Model seems ok, ratio of observed and predicted zeros is within the tolerance range.
+# Model seems ok, ratio of observed and predicted zeros is within the tolerance
+# range.
+tab_model(model.poi,model.nb)
 
-#tolerance is at list 5% 
 
-# TO CHECK OUR model we will develop a step forward selection approach
-# stepwise forward selection for best model #
-#               for infestation.            #
-# ========================================= #
+# ============== #
+logLik(model.poi)
+logLik(model.nb)
 
-fit.all=glm.nb(cap_ttl~., data =dt_model )
-summary(fit.all)
-formula(fit.all)
+lrtest(model.poi,model.nb)
+# Model 1: cap_ttl ~ SECTOR + CUY_INTRA + GAT_PER + elevation + n_people + 
+#   CALAM + ADOB_RE + TEL + CARR + AVE_INTRA + fumigad + PLAS + 
+#   PER_INT
+# Model 2: cap_ttl ~ elevation + SECTOR + CUY_INTRA + CALAM + fumigad
+# #Df  LogLik Df  Chisq Pr(>Chisq)    
+# 1  23 -229.43                         
+# 2  16 -155.54 -7 147.77  < 2.2e-16 ***
+#   ---
+#   Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+c(model.poi$aic,model.nb$aic)
+# 607.5753 357.7590
+# we are going to choose the model NB #
 
-fitstart = glm.nb(cap_ttl~1,data = dt_model)
+# using inf as presence and no presence
+# CHECKING THE LEVELS OF VARIABLES
+sapply(lapply(dt_model2, unique), length)
 
+# we will develop a stepwise forward selection as before 
+fit.all.log=glm(INF~., data =dt_model2,family = binomial(link = "logit"))
+
+summary(fit.all.log)
+formula(fit.all.log)
+
+fitstart.log = glm(INF~1,data =dt_model2,family = binomial(link = "logit"))
 summary(fitstart)
 
-step(fitstart,direction = "forward",scope = formula(fit.all))
+step(fitstart.log,direction = "forward",scope = formula(fit.all.log))
 
-# ANALYZING COLINEARITY #
-ggcorr(dt_model,palette = "RdBu",label = TRUE,label_round = 2)
-vif(fit.all)
+
+model.log<-glm(formula = INF ~ SECTOR + CUY_INTRA + CUY_PERI + GAT_PER + 
+             PER_INT, family = binomial(link = "logit"), data = dt_model2)
+
+summary(model.log)
+exp(model.log$coefficients)
+
+(exp(model.log$coefficients)-1)*100
+# (Intercept)  CUY_INTRA_        ndvi 
+# -82.05958  1054.04785   -94.76902 
+tab_model(model.log)
+
+
+
+
+
+####### using a gee model for clustering and correlated data ########
+#####################################################################
+
+# clustering and data correlated 
+library(foreign)
+library(survey)
+library(geepack)
+library(gee)
+library(MASS)
+
+
+
+
 
 # modeling for POS to T. cruzzi #
 # ============================= #
@@ -569,30 +657,88 @@ vif(fit.all)
 # y usar la variable Y como binomial POS=1 NEG=0
 # (positiva a T.cruzi, 9 viviendas de 143 inspeccionadas)
 
-
 # aqui usaremos la tabla de datos siguiente 
-dt_pos<-dt_analysis%>%dplyr::filter(dt_model$cap_ttl>=1)
-dt_pos<-dt_pos%>%dplyr::select(ndvi,elevation,fumigad,AVE_PERI,CUY_INTRA,AVE_PERI_,CUY_INTRA_,
-                                     GAT_PER,GAT_INT,PER_PER,PER_INT,LADR_NO, n_femal,n_male,n_people,pos_ttl,SECTOR,TEJ,PLAS,CARR,POS)
+dt_pos<-dt_analysis%>%dplyr::filter(dt_analysis$cap_ttl>=1)
+namedt_pos<-dt_pos%>%dplyr::select(ndvi,elevation,fumigad,AVE_PERI,CUY_PERI,AVE_INTRA,CUY_INTRA,n_people,SECTOR,TEJ,PLAS,CARR,POS)
+namedt_pos$SECTOR<-factor(namedt_pos$SECTOR)
+namedt_pos$SECTOR <- relevel(namedt_pos$SECTOR, ref = "AULLAN CENTRO")
+namedt_pos$fumigad<-factor(namedt_pos$fumigad)
+namedt_pos$fumigad <- relevel(namedt_pos$fumigad, ref = "SI")
 
-# stepwise forward selection for best model #
-#               for infestation.            #
-# ========================================= #
-
-model.logit<-glm(POS~elevation+ndvi+fumigad+AVE_PERI+CUY_INTRA+AVE_PERI_+CUY_INTRA_+
-                 GAT_PER+GAT_INT+PER_PER+PER_INT+n_femal+n_male+n_people+SECTOR+TEJ+CARR+PLAS,data = dt_pos,family=binomial(link = "logit"))
-summary(model.logit)
-
+# step wise forward selection for best model #
+#               for infection with T cruzi.  #
+# ========================================== #
 # CHECKING THE LEVELS OF VARIABLES
-sapply(lapply(dt_pos, unique), length)
+sapply(lapply(namedt_pos, unique), length)
 
 # we will develop a stepwise forward selection as before 
-fit.all.log=glm(POS~., data =dt_pos,family = "binomial")
+fit.all.log=glm(POS~., data =namedt_pos,family = binomial(link = "logit"))
 
 summary(fit.all.log)
-formula(fit.all)
+formula(fit.all.log)
 
-fitstart = glm.nb(POS~1,data = dt_pos)
+fitstart.log = glm(POS~1,data = namedt_pos,family = binomial(link = "logit"))
 summary(fitstart)
 
-step(fitstart,direction = "forward",scope = formula(fit.all))
+step(fitstart.log,direction = "forward",scope = formula(fit.all.log))
+
+
+model.log<-glm(formula = POS ~ ndvi + CUY_INTRA + AVE_INTRA + fumigad, family = binomial(link = "logit"), 
+               data = namedt_pos)
+
+summary(model.log)
+exp(model.log$coefficients)
+
+(exp(model.log$coefficients)-1)*100
+# (Intercept)  CUY_INTRA_        ndvi 
+# -82.05958  1054.04785   -94.76902 
+confint(model.log)
+
+exp(cbind(OR = coef(model.log), confint(model.log)))
+tab_model(model.log)
+
+
+dt_model1
+sapply(dt_model1, class)
+# SECTOR        ndvi   elevation     fumigad    AVE_PERI   AVE_INTRA    CUY_PERI 
+# "character"   "numeric"   "numeric" "character"   "integer"   "integer"   "integer" 
+# CUY_INTRA     GAT_INT     GAT_PER     PER_PER     PER_INT    n_people     cap_ttl 
+# "integer"   "integer"   "integer"   "integer"   "integer"   "integer"   "integer" 
+# ADOB_RE        CARR         TEJ         TEL        PLAS        NOBL     LADR_NO 
+# "integer"   "integer"   "integer"   "integer"   "integer"   "integer"   "integer" 
+# CALAM 
+# "integer" 
+dt_model1$SECTOR<-factor(dt_model1$SECTOR)
+dt_model1$SECTOR <- relevel(dt_model1$SECTOR, ref = "AULLAN CENTRO")
+head(dt_model1, n = 3)
+dt_model1$fumigad<-factor(dt_model1$fumigad)
+dt_model1$fumigad <- relevel(dt_model1$fumigad, ref = "SI")
+
+head(dt_model1, n = 3)
+
+URL <- "http://static.lib.virginia.edu/statlab/materials/data/depression.csv"
+dat <- read.csv(URL, stringsAsFactors = TRUE)
+dat$id <- factor(dat$id)
+dat$drug <- relevel(dat$drug, ref = "standard")
+head(dat, n = 3)
+
+mod_poi_gee <- gee( cap_ttl~ elevation + CUY_INTRA+CALAM+fumigad,
+               data = dt_model1, 
+               id = SECTOR, 
+               family = poisson(link = log),
+               corstr = "independence")
+
+summary(mod_poi_gee)
+tab_model(mod_poi_gee)
+exp(cbind(OR = coef(mod_poi_gee), confint(mod_poi_gee)))
+mod_poi_gee$coefficients
+
+exp(mod_poi_gee$coefficients)
+mod_bin_gee <- gee( INF ~ ndvi + CUY_INTRA + AVE_INTRA + fumigad,
+                    data = dt_model2, 
+                    id = SECTOR, 
+                    family = binomial("logit"),
+                    corstr = "independence")
+
+
+
